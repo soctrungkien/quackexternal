@@ -1,0 +1,2 @@
+#define INIT_SCRIPT 255
+#define PATCH_SCRIPT 254

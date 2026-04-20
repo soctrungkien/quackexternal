@@ -1,0 +1,41 @@
+# Visual Studio
+.vs/
+**/.vs/
+**/ipch/
+**/*.ipch
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Build output
+Quack/build/
+Quack/build/**
+**/*.pdb
+**/*.ilk
+**/*.lib
+**/*.obj
+**/*.exp
+x64/
+Debug/
+Release/
+
+# Dependencies (vendored, not tracked)
+vcpkg_installed/
+**/vcpkg_installed/
+**/vcpkg_installed/**
+
+# AI / editor session files
+.claude/
+memory/
+
+# Misc
+__pycache__/
+*.pyc
+*.patch
+*.orig
+*.rej
+*.zip
+*.7z
+*.b64
+tmp_*
