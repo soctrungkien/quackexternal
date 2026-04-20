@@ -43,7 +43,7 @@ Output: `Quack/build/Quack.exe`
 
 ## Compatibility
 
-Targets Roblox version `version-d599f7fc52a8404c`. Offsets are in `Quack/Source/Update/Offsets.hpp` and can be refreshed remotely via `Offsets::RefreshFromRemote()`.
+Currently supports Roblox version `version-9d412f44a6fe4081`. Offsets are in `Quack/Source/Update/Offsets.hpp` and can be refreshed remotely via `Offsets::RefreshFromRemote()`.
 
 SUNC (Standard UNC) compatibility is a primary goal of the Lua payload.
 
