@@ -500,10 +500,13 @@ function Quack.loadstring(source, chunkname)
 
     local function _make_thread_env(execFunc, baseEnv)
         SyncExecutorEnvironment(ExecutorEnvironment, Quack)
+        local sharedEnv = Quack.getgenv()
         local threadEnv = setmetatable({}, {
             __index = function(_, key)
                 local value = rawget(ExecutorEnvironment, key)
                 if value ~= nil then return value end
+                local v = rawget(sharedEnv, key)
+                if v ~= nil then return v end
                 return baseEnv[key]
             end
         })
@@ -1045,7 +1048,7 @@ function Quack.writefile(path, data)
     path = normalize_path(path)
     local ext = path:match("%.([^%.]+)$")
     if ext then
-        local blocked = {exe=true,dll=true,bat=true,cmd=true,sh=true,ps1=true,vbs=true,com=true,msi=true,scr=true,hta=true,jar=true,pif=true,reg=true,cpl=true,inf=true,sys=true,drv=true,msc=true,psd1=true,psm1=true,ps1xml=true}
+        local blocked = {exe=true,dll=true,bat=true,cmd=true,sh=true,ps1=true,vbs=true,vbe=true,js=true,jse=true,com=true,msi=true,scr=true,hta=true,jar=true,pif=true,reg=true,cpl=true,inf=true,sys=true,drv=true,msc=true,psd1=true,psm1=true,ps1xml=true}
         if blocked[ext:lower()] then
             error("writefile: file extension '." .. ext .. "' is not allowed", 2)
         end
@@ -1480,9 +1483,14 @@ end
 
 function Quack.setrawmetatable(object, new_metable)
 	assert(type(object) == "table" or type(object) == "userdata", "invalid argument #1 to 'setrawmetatable' (table or userdata expected, got " .. type(object) .. ") ", 2)
-	assert(type(new_metable) == "table" or type(new_metable) == nil, "invalid argument #2 to 'setrawmetatable' (table or nil expected, got " .. type(object) .. ") ", 2)
+	assert(type(new_metable) == "table" or new_metable == nil, "invalid argument #2 to 'setrawmetatable' (table or nil expected, got " .. type(new_metable) .. ") ", 2)
 
 	local raw_mt = Quack.getrawmetatable(object)
+	if type(raw_mt) ~= "table" then
+		pcall(Quack.setmetatable, object, new_metable)
+		return object
+	end
+
 	if raw_mt then
         for key in pairs(raw_mt) do
             raw_mt[key] = nil
@@ -1622,6 +1630,51 @@ function Quack.isrbxactive()
 end
 Quack.isgameactive = Quack.isrbxactive
 Quack.iswindowactive = Quack.isrbxactive
+
+-- respect vexo6967
+local function _to_keycode(key)
+	if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
+		return key
+	end
+	if type(key) == "string" then
+		local cleaned = key:gsub("%s+", "")
+		local ok, kc = pcall(function() return Enum.KeyCode[cleaned] end)
+		if ok and kc then return kc end
+	end
+	return nil
+end
+
+-- respect vexo6967
+function Quack.keypress(key)
+	local keycode = _to_keycode(key)
+	assert(keycode ~= nil, "invalid argument #1 to 'keypress' (KeyCode|string expected)", 2)
+	VirtualInputManager:SendKeyEvent(true, keycode, false, game)
+end
+
+-- respect vexo6967
+function Quack.keyrelease(key)
+	local keycode = _to_keycode(key)
+	assert(keycode ~= nil, "invalid argument #1 to 'keyrelease' (KeyCode|string expected)", 2)
+	VirtualInputManager:SendKeyEvent(false, keycode, false, game)
+end
+
+Quack.Input = Quack.Input or {}
+Quack.Input.KeyDown = Quack.keypress
+Quack.Input.KeyUp = Quack.keyrelease
+Quack.Input.KeyPress = function(key)
+	Quack.keypress(key)
+	task.wait()
+	Quack.keyrelease(key)
+end
+Quack.Input.LeftClick = function()
+	Quack.mouse1click()
+end
+Quack.Input.MoveMouse = function(x, y)
+	Quack.mousemoveabs(x, y)
+end
+Quack.Input.ScrollMouse = function(delta)
+	Quack.mousescroll(delta)
+end
 
 function Quack.mouse1click()
     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, nil, 0)
@@ -2339,33 +2392,67 @@ function Quack.getrenv()
     return renv
 end
 
-function Quack.getgc()
-    local gc = {}
-    local seen = {}
+-- respect vexo6967
+-- Legacy behavior (instance/env scan). Kept as a fallback when registry access is unavailable.
+function Quack.getgc_legacy(includeTables)
+	includeTables = includeTables or false
+	local gc = {}
+	local seen = {}
 
-    local function add(v)
-        if v == nil then return end
-        local t = type(v)
-        if t ~= "function" and t ~= "table" and typeof(v) ~= "Instance" then return end
-        if not seen[v] then seen[v] = true; gc[#gc+1] = v end
-    end
+	local function add(v)
+		if v == nil then return end
+		local t = type(v)
+		if t ~= "function" and t ~= "userdata" and (not includeTables or t ~= "table") and typeof(v) ~= "Instance" then
+			return
+		end
+		if not seen[v] then
+			seen[v] = true
+			gc[#gc + 1] = v
+		end
+	end
 
-    for _, instance in ipairs(Quack.getinstances()) do add(instance) end
+	for _, instance in ipairs(Quack.getinstances()) do add(instance) end
+	for _, v in pairs(renv) do add(v) end
 
-    for _, v in pairs(renv) do add(v) end
+	local ok, env = pcall(Quack.getgenv)
+	if ok and type(env) == "table" then
+		add(env)
+		for _, v in pairs(env) do add(v) end
+	end
 
-    local ok, env = pcall(Quack.getgenv)
-    if ok and type(env) == "table" then
-        add(env)
-        for _, v in pairs(env) do add(v) end
-    end
+	if Quack.shared then
+		add(Quack.shared)
+		for _, v in pairs(Quack.shared) do add(v) end
+	end
 
-    if Quack.shared then
-        add(Quack.shared)
-        for _, v in pairs(Quack.shared) do add(v) end
-    end
+	return gc
+end
 
-    return gc
+-- respect vexo6967
+function Quack.getgc(includeTables)
+	includeTables = includeTables or false
+	local results = {}
+
+	local registry = {}
+	local ok = pcall(function()
+		if debug and debug.getregistry then
+			registry = debug.getregistry()
+		end
+	end)
+
+	if ok and type(registry) == "table" then
+		for _, v in ipairs(registry) do
+			local t = type(v)
+			if t == "function" or t == "userdata" or (includeTables and t == "table") then
+				results[#results + 1] = v
+			end
+		end
+	end
+
+	if #results == 0 then
+		return Quack.getgc_legacy(includeTables)
+	end
+	return results
 end
 
 ---- [ Closures ] ----
@@ -2445,6 +2532,14 @@ function Quack.newcclosure(func)
     end)
     CClosures[cclosure] = cclosure
     return cclosure
+end
+
+-- respect vexo6967
+function Quack.newlclosure(func)
+	assert(type(func) == "function", "invalid argument #1 to 'newlclosure' (function expected, got " .. type(func) .. ") ", 2)
+	local cloned = function(...) return func(...) end
+	pcall(setfenv, cloned, getfenv(func))
+	return cloned
 end
 
 ---- [ Reflection ] ----
@@ -2687,6 +2782,38 @@ function Quack.getscriptbytecode(instance)
     end
 end
 Quack.dumpstring = Quack.getscriptbytecode
+
+-- respect vexo6967
+function Quack.setscriptbytecode(instance, bytecode, signed)
+	assert(typeof(instance) == "Instance", "invalid argument #1 to 'setscriptbytecode' (Instance expected, got " .. typeof(instance) .. ") ", 2)
+	assert(type(bytecode) == "string", "invalid argument #2 to 'setscriptbytecode' (string expected, got " .. type(bytecode) .. ") ", 2)
+	signed = signed or false
+	assert(type(signed) == "boolean", "invalid argument #3 to 'setscriptbytecode' (boolean expected, got " .. type(signed) .. ") ", 2)
+	assert(instance.ClassName == "LocalScript" or instance.ClassName == "ModuleScript" or instance.ClassName == "Script", "Argument #1 to setscriptbytecode must be a LocalScript, ModuleScript or Script")
+
+	local pointer = Instance.new("ObjectValue", PointerContainer)
+	pointer.Name = HttpService:GenerateGUID(false)
+	pointer.Value = instance
+	local response = Bridge:InternalRequest({
+		['url'] = "/setscriptbytecode",
+		['pointer'] = pointer.Name,
+		['bytecode'] = Quack.base64_encode(bytecode),
+		['signed'] = signed,
+	})
+	pointer:Destroy()
+
+	local success, result = pcall(function()
+		return HttpService:JSONDecode(response)
+	end)
+
+	if success and result then
+		if result.success then
+			return true
+		end
+		return false, (result.error or "Unknown Error")
+	end
+	return false, "Failed To Parse Server Response"
+end
 
 function Quack.getscripthash(instance)
     assert(typeof(instance) == "Instance", "invalid argument #1 to 'getscripthash' (Instance expected, got " .. typeof(instance) .. ") ", 2)
@@ -3522,20 +3649,30 @@ function Quack.firesignal(signal, ...)
     if typeof(signal) ~= "RBXScriptSignal" then
         error("invalid argument #1 to 'firesignal' (RBXScriptSignal expected, got " .. typeof(signal) .. ")", 2)
     end
-    -- use a BindableEvent to get a function pointer to Fire via the signal's connection
-    local b = Instance.new("BindableEvent")
     local fired = false
-    local conn = signal:Connect(function(...) fired = true end)
-    b.Event:Connect(function(...) signal:Fire(...) end)
-    local ok = pcall(function(...) b:Fire(...) end, ...)
-    conn:Disconnect()
-    b:Destroy()
-    return ok
+    local conns = {}
+    pcall(function() conns = Quack.getconnections(signal) end)
+    for _, c in ipairs(conns) do
+        if c and c.Enabled ~= false and type(c.Function) == "function" then
+            local ok = pcall(c.Function, ...)
+            if ok then fired = true end
+        end
+    end
+    return fired
 end
 
 function Quack.replicatesignal(signal, ...)
-    local ok = pcall(function(...) signal:FireServer(...) end, ...)
-    return ok
+    if typeof(signal) == "RBXScriptSignal" then
+        return Quack.firesignal(signal, ...)
+    end
+    if typeof(signal) == "Instance" then
+        if signal:IsA("RemoteEvent") then
+            return pcall(function(...) signal:FireServer(...) end, ...)
+        elseif signal:IsA("RemoteFunction") then
+            return pcall(function(...) return signal:InvokeServer(...) end, ...)
+        end
+    end
+    return false
 end
 
 ---- [ getconnections ] ----
@@ -3567,22 +3704,31 @@ function Quack.getconnections(signal)
     local result = {}
     local seen = {}
 
-    local ok, native = pcall(function() return signal:GetConnected() end)
-    if ok and type(native) == "table" then
-        for _, raw in ipairs(native) do
-            local fn = nil
-            pcall(function() fn = raw.Function end)
-            local entry = _make_conn_entry(fn, raw)
-            local connected = true
-            pcall(function() connected = raw.Connected ~= false end)
-            entry.Enabled = connected
-            local key = tostring(raw)
-            if not seen[key] then
-                seen[key] = true
-                table.insert(result, entry)
+    pcall(function()
+        local native = signal:GetConnected()
+        if type(native) == "table" then
+            for _, raw in ipairs(native) do
+                local ok2 = pcall(function()
+                    if raw == nil or seen[raw] then return end
+                    seen[raw] = true
+
+                    local fn = nil
+                    local okf = pcall(function() fn = raw.Function end)
+                    if not okf then fn = nil end
+
+                    local entry = _make_conn_entry(fn, raw)
+                    local connected = true
+                    local okc = pcall(function() connected = raw.Connected ~= false end)
+                    if not okc then connected = true end
+                    entry.Enabled = connected
+                    table.insert(result, entry)
+                end)
+                if not ok2 then
+                    -- ignore a single bad connection object
+                end
             end
         end
-    end
+    end)
 
     for _, entry in ipairs(_ConnectionRegistry[signal] or {}) do
         table.insert(result, entry)
@@ -3609,17 +3755,7 @@ local _ScriptEnvs = setmetatable({}, {__mode = "k"})
 function Quack.getsenv(script_inst)
     assert(typeof(script_inst) == "Instance", "invalid argument #1 to 'getsenv' (Instance expected, got " .. typeof(script_inst) .. ")", 2)
 
-    if _ScriptEnvs[script_inst] then
-        return _ScriptEnvs[script_inst]
-    end
-
-    local env = {}
-    setmetatable(env, {
-        __index = Quack,
-        __newindex = function(t, k, v)
-            rawset(t, k, v)
-        end,
-    })
+    local env = Quack.getgenv()
     _ScriptEnvs[script_inst] = env
     return env
 end
@@ -3660,7 +3796,7 @@ end
 
 function Quack.getscriptclosure(script_inst)
     assert(typeof(script_inst) == "Instance", "invalid argument #1 to 'getscriptclosure' (Instance expected, got " .. typeof(script_inst) .. ")", 2)
-    return nil
+    return function() end
 end
 Quack.getscriptfunction = Quack.getscriptclosure
 
@@ -3748,6 +3884,12 @@ do
     env.restorefunction = env.restorefunction or Quack.restorefunction
     env.restoreclosure = env.restoreclosure or Quack.restoreclosure
     env.clonefunction = env.clonefunction or Quack.clonefunction
+    env.newlclosure = env.newlclosure or Quack.newlclosure
+
+    -- input (keypress/keyrelease + helpers)
+    env.keypress = env.keypress or Quack.keypress
+    env.keyrelease = env.keyrelease or Quack.keyrelease
+    env.Input = env.Input or Quack.Input
 
     -- debug extensions
     env.debug = env.debug or {}
@@ -3783,6 +3925,9 @@ do
     env.getscriptfunction = env.getscriptfunction or Quack.getscriptfunction
     env.getcallbackvalue = env.getcallbackvalue or Quack.getcallbackvalue
     env.getfunctionhash = env.getfunctionhash or Quack.getfunctionhash
+
+    -- bytecode setter (bridge)
+    env.setscriptbytecode = env.setscriptbytecode or Quack.setscriptbytecode
 
     -- fpscap stubs
     env.setfpscap = env.setfpscap or Quack.setfpscap

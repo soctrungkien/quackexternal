@@ -47,6 +47,17 @@ Currently supports Roblox version `version-2e6461290a3541f5`. Offsets are in `Qu
 
 SUNC (Standard UNC) compatibility is a primary goal of the Lua payload.
 
+## Attribution
+
+The following Lua API functions were rewritten with reference to `External-Executor-Module` by Vexo6967:
+`setscriptbytecode`, `keypress`, `keyrelease`, `newlclosure`, and the registry-based `getgc` behavior.
+
+Referenced repository: `https://github.com/Vexo6967/External-Executor-Module`
+
+Permission note: The repository author confirmed (via Discord DM) that referencing and rewriting functions is allowed as long as proper credit is given.
+
+Please respect the original author (@vexo6967 on Discord).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

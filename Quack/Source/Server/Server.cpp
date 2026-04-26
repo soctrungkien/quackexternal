@@ -1407,6 +1407,74 @@ void StartServer() {
         }
     });
 
+    Http_Server.Post("/setscriptbytecode", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto json_data = nlohmann::json::parse(req.body);
+            std::string pid = json_data.value("pid", "");
+            std::string pointer = json_data.value("pointer", "");
+            std::string bytecode_b64 = json_data.value("bytecode", "");
+            bool signed_input = json_data.value("signed", false);
+
+            if (pid.empty() || pointer.empty() || bytecode_b64.empty()) {
+                nlohmann::json response = {
+                    {"success", false},
+                    {"error", "Missing Required Fields: pid, pointer or bytecode"}
+                };
+                res.set_content(response.dump(), "application/json");
+                return;
+            }
+
+            std::string bytecode = base64::from_base64(bytecode_b64);
+            if (!signed_input) {
+                bytecode = Bytecode::Sign(bytecode);
+            }
+
+            std::shared_lock lock(Clients_Mutex);
+            for (auto& client : Clients) {
+                if (std::to_string(client.PID) == pid) {
+                    Instance base_script = client.Get_Pointer_Instance(pointer);
+                    if (base_script.ClassName() == "LocalScript" || base_script.ClassName() == "Script") {
+                        ScriptClass script = base_script;
+                        script.SetBytecode(bytecode, false);
+
+                        nlohmann::json response = { {"success", true} };
+                        res.set_content(response.dump(), "application/json");
+                        return;
+                    }
+                    else if (base_script.ClassName() == "ModuleScript") {
+                        ModuleScriptClass script = base_script;
+                        script.IsCoreScript(Offsets::Enums::ModuleType::Core);
+                        script.SetBytecode(bytecode, false);
+
+                        nlohmann::json response = { {"success", true} };
+                        res.set_content(response.dump(), "application/json");
+                        return;
+                    }
+
+                    nlohmann::json response = {
+                        {"success", false},
+                        {"error", "Not A Valid Script Container"},
+                    };
+                    res.set_content(response.dump(), "application/json");
+                    return;
+                }
+            }
+
+            nlohmann::json response = {
+                {"success", false},
+                {"error", "Unknown Error Occured"}
+            };
+            res.set_content(response.dump(), "application/json");
+        }
+        catch (const std::exception& e) {
+            nlohmann::json response = {
+                {"success", false},
+                {"error", "Server Error: " + std::string(e.what())}
+            };
+            res.set_content(response.dump(), "application/json");
+        }
+    });
+
     Http_Server.Post("/getscripthash", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json_data = nlohmann::json::parse(req.body);
