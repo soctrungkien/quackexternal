@@ -40,5 +40,4 @@ jobs:
         with:
           name: Quack-Build
           path: |
-            build/**/*.exe
-            **/Release/**/*.exe
+            Quack/build/Quack.exe
