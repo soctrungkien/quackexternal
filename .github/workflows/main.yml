@@ -1,18 +1,12 @@
 name: Quack Auto Build
 
 on:
-  push:
-    branches:
-      - main
-      - master
-
-  pull_request:
-
-workflow_dispatch:
+  # Cho phép kích hoạt thủ công từ tab Actions
+  workflow_dispatch: 
 
 jobs:
   build:
-    runs-on: windows-2025-vs2026
+    runs-on: windows-2022
 
     strategy:
       matrix:
@@ -22,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -33,6 +29,7 @@ jobs:
         run: nuget restore Quack.sln
 
       - name: Build Solution
+        shell: cmd
         run: |
           MSBuild Quack.sln ^
             /p:Configuration=${{ matrix.config }} ^
